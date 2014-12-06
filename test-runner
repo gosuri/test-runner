@@ -61,11 +61,9 @@ function run() {
 
 function setup_ssh() {
   log "Copying SSH keys. Using SSH private key from ${sshkey}"
-  cat > "${cachedir}/git-ssh" <<EOF
-  ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \$*
-EOF
- chmod +x "${cachedir}/git-ssh"
- mkdir -p ${cachedir}/app-base
+  echo "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o IdentityFile=${sshkey} \$*" > "${cachedir}/git-ssh"
+  chmod +x "${cachedir}/git-ssh"
+  mkdir -p ${cachedir}/app-base
 
  # copy keys to cache directories
  cp ${cachedir}/git-ssh ${cachedir}/app-base/git-ssh
