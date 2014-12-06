@@ -219,7 +219,10 @@ function tag_build() {
   local dir="${cachedir}/${devimg}/app"
   local tag="deploy_${branch}"
   log "Pushing tag ${tag} to ${repo}"
-  (cd $dir && git tag -f ${tag} && GIT_SSH="${cachedir}/git-ssh" git push -f origin ${tag} >> ${logfile} 2>&1)
+  pushd $dir
+  git tag -f ${tag}
+  GIT_SSH="${cachedir}/git-ssh" git push -f origin ${tag} >> ${logfile} 2>&1
+  popd
 }
 
 function cleanup() {
