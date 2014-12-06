@@ -297,7 +297,7 @@ function abort_if_missing_command() {
 function info() {
   local msg="==> ${PROGRAM}: ${*}"
   local bold=$(tput bold)
-  local reset=$(tput sgr0)
+  local reset="\e[0m"
   echo -e "${msg}" >> ${logfile}
   echo -e "${bold}${msg}${reset}"
 }
