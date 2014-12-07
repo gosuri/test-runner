@@ -31,7 +31,7 @@ COMPILER_PACKAGES="
 "
 
 function run() {
-  trap cleanup EXIT
+  trap finish EXIT
   
   # setup git-ssh and copy private key to the cache directory
   setup_ssh
@@ -45,18 +45,8 @@ function run() {
   # Start support services (pg and redis)
   start_services
   
-  # Run tests
-  run_tests
-  
-  # Tag the current build as deploy_branch
-  if [ $? -eq 0 ]; then
-    info "Build successful"
-    tag_build
-    exit 0
-  else
-    echo >&2 -e "Build failed"
-    exit $?
-  fi
+  # Run tests and tag the current build as deploy_branch when successfull
+  run_tests && tag_build
 }
 
 function setup_ssh() {
@@ -65,11 +55,7 @@ function setup_ssh() {
   chmod +x "${cachedir}/git-ssh"
   mkdir -p ${cachedir}/app-base
 
- # copy keys to cache directories
- cp ${cachedir}/git-ssh ${cachedir}/app-base/git-ssh
- cp ${sshkey} ${cachedir}/app-base
 }
-
 
 function setup_base_containers() {
   info "Setting up base containers"
@@ -97,8 +83,14 @@ function setup_base_containers() {
 
 function build_app_base_container() {
   log "building application base container"
-  mkdir -p "${cachedir}/app-base"
-  tee "${cachedir}/app-base/Dockerfile" > /dev/null <<EOF
+  local dir="${cachedir}/app-base"
+  mkdir -p ${dir}
+ 
+  # copy keys and set ssh config
+  cp ${sshkey} "${dir}/id_rsa"
+  echo "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \$*" > ${dir}/git-ssh
+
+  cat > "${dir}/Dockerfile" <<EOF
 # Pull the latest canonical ubuntu image
 FROM ubuntu
 
@@ -118,7 +110,7 @@ ADD git-ssh /bin/git-ssh
 RUN chmod +x /bin/git-ssh
 ENV GIT_SSH /bin/git-ssh
 EOF
-  docker build --rm --tag app-base ${cachedir}/app-base >> ${logfile} 2>&1
+  docker build --rm --tag app-base ${cachedir}/app-base 2>&1 | debug
 }
 
 function build_ruby_compiler_base_container() {
@@ -146,7 +138,7 @@ RUN gem install rubygems-update bundler --no-ri --no-rdoc && update_rubygems
 RUN mkdir -p /app/vendor/node/${NODE_VERSION}
 RUN curl http://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz | tar xz --strip-components=1 -C /app/vendor/node/${NODE_VERSION}
 EOF
-  docker build --rm --tag ruby-compiler-base ${dir} >> ${logfile} 2>&1
+  docker build --rm --tag ruby-compiler-base ${dir} 2>&1 | debug
 }
 
 function build_app_dev_container() {
@@ -159,7 +151,7 @@ ENV RAILS_ENV test
 RUN mkdir -p /app
 WORKDIR /app
 EOF
-  docker build --rm --tag ${devimg} ${dir} >> ${logfile} 2>&1
+  docker build --rm --tag ${devimg} ${dir} 2>&1 | debug
 }
 
 function compile_app() {
@@ -171,9 +163,8 @@ function compile_app() {
 FROM ${devimg}
 ADD app app
 RUN bundle install --path=vendor/bundle --binstubs vendor/bundle/bin --jobs=4 --retry=3
-#RUN bundle exec rake db:migrate
 EOF
-  docker build --rm --tag ${devimg} $dir >> ${logfile} 2>&1
+  docker build --rm --tag ${devimg} $dir 2>&1 | debug
 }
 
 function get_app_source() {
@@ -181,18 +172,23 @@ function get_app_source() {
   local dir="${cachedir}/${devimg}/app"
   rm -rf ${dir} # keep it fresh
   mkdir -p ${dir}
-  GIT_SSH="${cachedir}/git-ssh" git clone -b ${branch} ${repo} ${dir} --depth 1 >> ${logfile} 2>&1
+  GIT_SSH="${cachedir}/git-ssh" git clone -q -b ${branch} ${repo} ${dir} --depth 1 > ${errlog} 2>&1 
+  rm ${errlog}
 }
 
 function start_services() {
-  info "Staring support services"
-  redis=$(docker run --name $devimg-redis-${RANDOM} -d redis 2> ${logfile})
+  info "Starting support services"
+  log "Starting redis container"
+  redis=$(docker run --name $devimg-redis-${RANDOM} -d redis 2> ${errlog})
   redisip=$(docker inspect -f "{{ .NetworkSettings.IPAddress }}" ${redis})
-  log "running redis container at ${redisip}:6379"
+  log "Running redis at ${redisip}:6379"
+  rm ${errlog}
   
-  pg=$(docker run --name $devimg-pg-${RANDOM} -d postgres 2> ${logfile})
+  log "Starting postgres container"
+  pg=$(docker run --name $devimg-pg-${RANDOM} -d postgres 2> ${errlog})
   pgip=$(docker inspect -f "{{ .NetworkSettings.IPAddress }}" ${pg})
-  log "running postgres container at ${pgip}:5432"
+  log "Running postgres at ${pgip}:5432"
+  rm ${errlog}
 
   envfile="${cachedir}/.env"
 
@@ -204,13 +200,13 @@ EOF
 
 function run_tests() {
   log "Creating database using: ${dbcreatecmd}"
-  docker run --env-file=${envfile} $devimg ${dbcreatecmd} >> ${logfile} 2>&1
+  docker run --rm --env-file=${envfile} $devimg ${dbcreatecmd} 2>&1 | debug
 
   log "Running database migrations using: ${dbmigratecmd}"
-  docker run --env-file=${envfile} $devimg ${dbmigratecmd} >> ${logfile} 2>&1
+  docker run --rm --env-file=${envfile} $devimg ${dbmigratecmd} 2>&1 | debug
 
   info "Running tests using: ${testcmd}"
-  docker run --env-file=${envfile} -t $devimg ${testcmd}
+  docker run --rm --env-file=${envfile} -t $devimg ${testcmd} 2>&1 | log
 }
 
 function tag_build() {
@@ -218,28 +214,42 @@ function tag_build() {
   local tag="deploy_${branch}"
   log "Pushing tag ${tag} to ${repo}"
   pushd $dir > /dev/null
-  git tag -f ${tag}
-  GIT_SSH="${cachedir}/git-ssh" git push -f origin ${tag} >> ${logfile} 2>&1
+  git tag -f ${tag} 2>&1 | debug
+  GIT_SSH="${cachedir}/git-ssh" git push -f origin ${tag} > ${errlog} 2>&1
   popd > /dev/null
 }
 
-function cleanup() {
+function finish() {
+  local exitcode=$?
+  local red=$(tput setaf 1)
+  local reset="\033[0m"
+  local msg="${red}$@${reset}"
+  
   info "Cleaning up"
-  exitstatus=$?
   
   # stop support services
-  if [ -n ${redis} ]; then
-    docker rm -f ${redis} >> ${logfile} 2>&1
+  if [[ -n "${redis}" ]]; then
+    docker rm -f ${redis} 2>&1 | debug
     log "Removed redis container"
   fi
 
-  if [ -n ${pg} ]; then
-    docker rm -f ${pg} >> ${logfile} 2>&1
+  if [[ -n "${pg}" ]]; then
+    docker rm -f ${pg} 2>&1 | debug
     log "Removed postgres container"
   fi
-  
-  exit ${exitstatus}
+
+  if [[ ${exitcode} -eq 0 ]]; then
+    info "Build successful"
+    rm -rf ${errlog}
+    exit 0
+  else
+    [[ -f ${errlog} ]] && echo -e "${red}$(cat ${errlog})" | log
+    info "${red}Build failed"
+    rm -rf ${errlog}
+    exit ${exitcode}
+  fi
 }
+
 
 function init() {
   if [ -z "${cachedir}" ]; then
@@ -267,29 +277,18 @@ function init() {
   # create cache directory if missing
   mkdir -p ${cachedir}/${appname}-dev
   
-  logfile="${cachedir}/run.log"
-
   info "Starting tests for ${appname}"
-  log "Logging to ${logfile}"
   
   # exit script if we would use an uninitialised variable
   set -o nounset
 
   # exit script when a simple command (not a control structure) fails
   set -o errexit
+
+  set -o pipefail
 }
 
-# Abort and writes the message in red to standard error
-#
-function abort() {
-  local red=$(tput setaf 1)
-  local reset=$(tput sgr0)
-  echo >&2 -e "${red}$@${reset}"
-  exit 1
-}
 
-# Aborts the given command is missing
-#
 function abort_if_missing_command() {
   local cmd=$1
   type ${cmd} >/dev/null 2>&1 || abort "${2}"
@@ -299,22 +298,43 @@ function info() {
   local msg="==> ${PROGRAM}: ${*}"
   local bold=$(tput bold)
   local reset="\033[0m"
-  echo -e "${msg}" >> ${logfile}
   echo -e "${bold}${msg}${reset}"
 }
 
 function log() {
-  local msg="    ${PROGRAM}: ${*}"
-  echo -e "${msg}"
-  echo -e "${*}" >> ${logfile}
+  # read stdin when piped
+  set +o nounset
+  if [ -z "${1}" ]; then
+    while read line ; do
+      echo >&2 -e "                 ${line}"
+    done
+  else
+    echo >&2 -e "    ${PROGRAM}: ${*}"
+  fi
+  set -o nounset
 }
 
 function debug() {
-  local msg="    [debug] ${*}"
-  if [ ${verbose} -gt 0 ]; then
-    echo -e "${msg}"
+  set +o nounset
+  if [ ${verbose} -eq 1 ]; then
+    # read stdin when piped
+    if [ -z "${1}" ]; then
+      while read line ; do
+        echo >&2 -e "                 ${line}"
+      done
+    else
+      echo >&2 -e "                 ${*}"
+    fi
   fi
-  echo -e "${msg}" >> ${logfile}
+  set -o nounset
+}
+
+function abort() {
+  local red=$(tput setaf 1)
+  local reset=$(tput sgr0)
+  local msg="${red}$@${reset}"
+  echo >&2 -e "                 ${msg}"
+  exit 1
 }
 
 function parse_opts() {
@@ -407,7 +427,6 @@ verbose=0
 repo=''
 cachedir=''
 appname=''
-logfile=''
 devimg=''
 sshkey="${HOME}/.ssh/id_rsa"
 branch='master'
@@ -418,6 +437,7 @@ redis=''
 redisip=''
 pg=''
 pgip=''
+errlog=$(mktemp ${TMPDIR}/${PROGRAM}-err-XXXX)
 
 parse_opts "$@"
 init
