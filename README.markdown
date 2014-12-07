@@ -60,7 +60,8 @@ Install docker using boot2docker. Instructions are available [here](http://docs.
 
 1. Download and run [Docker OSX Installer](http://docs.docker.com/installation/mac/)
 2. Initialize Boot2Docker using the below:
-
-    $ boot2docker init
-    $ boot2docker start
-    $ $(boot2docker shellinit)
+```
+$ boot2docker init
+$ boot2docker start
+$ $(boot2docker shellinit)
+```
