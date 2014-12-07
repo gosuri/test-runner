@@ -118,7 +118,7 @@ ADD git-ssh /bin/git-ssh
 RUN chmod +x /bin/git-ssh
 ENV GIT_SSH /bin/git-ssh
 EOF
-  docker build --tag app-base ${cachedir}/app-base >> ${logfile} 2>&1
+  docker build --rm --tag app-base ${cachedir}/app-base >> ${logfile} 2>&1
 }
 
 function build_ruby_compiler_base_container() {
@@ -139,16 +139,14 @@ RUN mkdir -p /app
 RUN git clone https://github.com/sstephenson/ruby-build.git /ruby-build
 RUN /ruby-build/bin/ruby-build ${RUBY_VERSION} /app/vendor/ruby/${RUBY_VERSION}
 
-# Install nodejs binaries
-RUN curl http://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz | tar xz
-RUN mkdir -p /app/vendor/node/${NODE_VERSION}
-RUN mv node-v${NODE_VERSION}-linux-x64/* /app/vendor/node/${NODE_VERSION}
-
 # Install and update rubygems and install bundler
-RUN gem install rubygems-update bundler --no-ri --no-rdoc
-RUN update_rubygems
+RUN gem install rubygems-update bundler --no-ri --no-rdoc && update_rubygems
+
+# Install nodejs binaries
+RUN mkdir -p /app/vendor/node/${NODE_VERSION}
+RUN curl http://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz | tar xz --strip-components=1 -C /app/vendor/node/${NODE_VERSION}
 EOF
-  docker build --tag ruby-compiler-base ${dir} >> ${logfile} 2>&1
+  docker build --rm --tag ruby-compiler-base ${dir} >> ${logfile} 2>&1
 }
 
 function build_app_dev_container() {
@@ -161,7 +159,7 @@ ENV RAILS_ENV test
 RUN mkdir -p /app
 WORKDIR /app
 EOF
-  docker build --tag ${devimg} ${dir} >> ${logfile} 2>&1
+  docker build --rm --tag ${devimg} ${dir} >> ${logfile} 2>&1
 }
 
 function compile_app() {
@@ -175,7 +173,7 @@ ADD app app
 RUN bundle install --path=vendor/bundle --binstubs vendor/bundle/bin --jobs=4 --retry=3
 #RUN bundle exec rake db:migrate
 EOF
-  docker build --tag ${devimg} $dir >> ${logfile} 2>&1
+  docker build --rm --tag ${devimg} $dir >> ${logfile} 2>&1
 }
 
 function get_app_source() {
@@ -192,7 +190,7 @@ function start_services() {
   redisip=$(docker inspect -f "{{ .NetworkSettings.IPAddress }}" ${redis})
   log "running redis container at ${redisip}:6379"
   
-  pg=$(docker run --name $devimg-pg-${RANDOM} -d postgres)
+  pg=$(docker run --name $devimg-pg-${RANDOM} -d postgres 2> ${logfile})
   pgip=$(docker inspect -f "{{ .NetworkSettings.IPAddress }}" ${pg})
   log "running postgres container at ${pgip}:5432"
 
@@ -219,10 +217,10 @@ function tag_build() {
   local dir="${cachedir}/${devimg}/app"
   local tag="deploy_${branch}"
   log "Pushing tag ${tag} to ${repo}"
-  pushd $dir
+  pushd $dir > /dev/null
   git tag -f ${tag}
   GIT_SSH="${cachedir}/git-ssh" git push -f origin ${tag} >> ${logfile} 2>&1
-  popd
+  popd > /dev/null
 }
 
 function cleanup() {
@@ -247,6 +245,9 @@ function init() {
   if [ -z "${cachedir}" ]; then
     cachedir=$(mktemp -d --tmpdir $TMPDIR build-compiler-XXXXXXX)
   fi
+
+  # get absolute path 
+  cachedir=$(cd $(dirname ${cachedir}); pwd)/$(basename ${cachedir})
 
   # determine applicaiton name from gitrepo
   if [ -z "${appname}" ]; then
@@ -297,7 +298,7 @@ function abort_if_missing_command() {
 function info() {
   local msg="==> ${PROGRAM}: ${*}"
   local bold=$(tput bold)
-  local reset="\e[0m"
+  local reset="\033[0m"
   echo -e "${msg}" >> ${logfile}
   echo -e "${bold}${msg}${reset}"
 }
