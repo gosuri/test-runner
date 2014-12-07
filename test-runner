@@ -164,6 +164,7 @@ FROM ${devimg}
 ADD app app
 RUN bundle install --path=vendor/bundle --binstubs vendor/bundle/bin --jobs=4 --retry=3
 EOF
+  log "Building ${devimg} container"
   docker build --rm --tag ${devimg} $dir 2>&1 | debug
 }
 
@@ -316,13 +317,17 @@ function log() {
 
 function debug() {
   set +o nounset
-  if [ ${verbose} -eq 1 ]; then
-    # read stdin when piped
-    if [ -z "${1}" ]; then
-      while read line ; do
+  # read stdin when piped
+  if [ -z "${1}" ]; then
+    while read line ; do
+      if [[ "${verbose}" == "1" ]]; then
         echo >&2 -e "                 ${line}"
-      done
-    else
+      else
+        echo ${line} > /dev/null
+      fi
+    done
+  else
+    if [[ "${verbose}" == "1" ]]; then
       echo >&2 -e "                 ${*}"
     fi
   fi
