@@ -34,8 +34,33 @@ Docker based test running tools for ruby applications
       -V, --verbose
           Run in verbose mode
 
+## Requirements
+
+### Ubuntu
+
+* Git ~> 2.0.1
+* Docker ~> 1.3.1
+
+### MacOSX
+
+* Boot2Docker 1.3.2 (Docker v1.3.2, Linux v3.16.7)
+* Boot2Docker Management Tool v1.3.2
+* Docker Client v1.3.2
+* VirtualBox v4.3.18-r96516
+
 ## Installation
 
     $ git clone git@github.com:gosuri/test-runner.git
     $ cd test-runner
     $ make install
+
+### MacOSX Instructions
+
+Install docker using boot2docker. Instructions are available [here](http://docs.docker.com/installation/mac/)
+
+1. Download and run [Docker OSX Installer](http://docs.docker.com/installation/mac/)
+2. Initialize Boot2Docker using the below:
+
+    $ boot2docker init
+    $ boot2docker start
+    $ $(boot2docker shellinit)
