@@ -146,6 +146,7 @@ function build_app_dev_container() {
   cat > "${dir}/Dockerfile" <<EOF
 FROM ruby-compiler-base
 ENV RAILS_ENV test
+ENV RACK_ENV test
 RUN mkdir -p /app
 WORKDIR /app
 EOF
@@ -201,6 +202,7 @@ function start_services() {
   envfile="${cachedir}/.env"
 
   cat > ${envfile} <<EOF
+RACK_ENV=test
 REDIS_HOST=${redisip}
 POSTGRES_HOST=${pgip}
 POSTGRES_USER='postgres'
