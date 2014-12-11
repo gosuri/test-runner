@@ -184,16 +184,30 @@ function start_services() {
   rm ${errlog}
   
   log "Starting postgres container"
-  pg=$(docker run --name $devimg-pg-${RANDOM} -d postgres 2> ${errlog})
+  local pguser='postgres'
+  local pgpass='password'
+  pg=$(docker run -e POSTGRES_PASSWORD=${pgpass} --name $devimg-pg-${RANDOM} -d postgres 2> ${errlog})
   pgip=$(docker inspect -f "{{ .NetworkSettings.IPAddress }}" ${pg})
   log "Running postgres at ${pgip}:5432"
   rm ${errlog}
 
+  log "Starting rabbitmq container"
+  local rabbituser='admin'
+  local rabbitpass="admin-${RANDOM}"
+  rabbit=$(docker run --name ${devimg}-rabbit-${RANDOM} -e RABBITMQ_PASS=${rabbitpass} -d tutum/rabbitmq)
+  rabbitip=$(docker inspect -f "{{ .NetworkSettings.IPAddress }}" ${rabbit})
+  log "Running rabbitmq at ${rabbitip}:5672"
+  
   envfile="${cachedir}/.env"
 
   cat > ${envfile} <<EOF
 REDIS_HOST=${redisip}
 POSTGRES_HOST=${pgip}
+POSTGRES_USER='postgres'
+POSTGRES_PASSWORD='password'
+RABBITMQ_HOST=${rabbitip}
+RABBITMQ_USER=${rabbituser}
+RABBITMQ_PASSWORD=${rabbitpass}
 EOF
 }
 
@@ -237,6 +251,12 @@ function finish() {
     log "Removed postgres container"
   fi
 
+  if [[ -n "${rabbit}" ]]; then
+    docker rm -f ${rabbit} 2>&1 | debug
+    log "Removed rabbitmq container"
+  fi
+
+
   if [[ ${exitcode} -eq 0 ]]; then
     info "Build successful"
     rm -rf ${errlog}
@@ -252,7 +272,7 @@ function finish() {
 
 function init() {
   if [ -z "${cachedir}" ]; then
-    cachedir=$(mktemp -d --tmpdir $TMPDIR build-compiler-XXXXXXX)
+    cachedir=$(mktemp -d -t ${PROGRAM}-XXXXXX)
   fi
 
   # get absolute path 
@@ -264,7 +284,7 @@ function init() {
   fi
   
   if [ -z "${appname}" ]; then
-    abort "error: could not determine application name. specify using --app-name"
+    abort "error: could not determine application name. specify using --name=<appname>"
   fi
 
   devimg="${appname}-dev"
@@ -435,12 +455,14 @@ sshkey="${HOME}/.ssh/id_rsa"
 branch='master'
 testcmd="bundle exec rspec"
 dbcreatecmd="bundle exec rake db:create"
-dbmigratecmd="bundle exec rake db:schema:load"
+dbmigratecmd="bundle exec rake db:migrate"
 redis=''
 redisip=''
 pg=''
 pgip=''
-errlog=$(mktemp ${TMPDIR}/${PROGRAM}-err-XXXX)
+rabbit=''
+rabbitip=''
+errlog=$(mktemp -t ${PROGRAM}-err-XXXX)
 
 parse_opts "$@"
 init

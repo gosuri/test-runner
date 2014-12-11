@@ -58,6 +58,16 @@ Docker based test running tools for ruby applications
 
 Install docker using boot2docker. Instructions are available [here](http://docs.docker.com/installation/mac/)
 
+#### Using Homebrew
+
+    $ brew update
+    $ brew install boot2docker
+    $ boot2docker init
+    $ boot2docker start
+    $ $(boot2docker shellinit)
+
+#### Using Installer
+
 1. Download and run [Docker OSX Installer](http://docs.docker.com/installation/mac/)
 2. Initialize Boot2Docker using the below:
 ```
