@@ -23,11 +23,15 @@ COMPILER_PACKAGES="
   libxslt1-dev
   libcurl4-openssl-dev
   python-software-properties
+"
+
+APP_PACKAGES="
   postgresql-client
   mysql-client
   libmysqlclient-dev
   libpq-dev
   phantomjs
+  sphinxsearch
 "
 
 function run() {
@@ -142,9 +146,11 @@ EOF
 function build_app_dev_container() {
   log "building ${devimg} container"
   local dir="${cachedir}/${devimg}"
+  local pkgs=$(printf "%s " $APP_PACKAGES)
   mkdir -p ${dir}
   cat > "${dir}/Dockerfile" <<EOF
 FROM ruby-compiler-base
+RUN apt-get update && apt-get install -y ${pkgs}
 ENV RAILS_ENV test
 ENV RACK_ENV test
 RUN mkdir -p /app
