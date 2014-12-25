@@ -32,10 +32,11 @@ APP_PACKAGES="
   libpq-dev
   phantomjs
   sphinxsearch
+  libgeoip-dev
 "
 
 function run() {
-  trap finish EXIT
+  # trap finish EXIT
   
   # setup git-ssh and copy private key to the cache directory
   setup_ssh
@@ -224,7 +225,7 @@ function run_tests() {
   docker run --rm --env-file=${envfile} $devimg ${dbcreatecmd} 2>&1 | debug
 
   log "Running database migrations using: ${dbmigratecmd}"
-  docker run --rm --env-file=${envfile} $devimg ${dbmigratecmd} 2>&1 | debug
+  docker run --rm --env-file=${envfile} $devimg /bin/sh -c "${dbmigratecmd}" 2>&1 | debug
 
   info "Running tests using: ${testcmd}"
   docker run --rm --env-file=${envfile} -t $devimg ${testcmd} 2>&1 | log
@@ -368,6 +369,10 @@ function abort() {
   exit 1
 }
 
+function version() {
+  echo "0.1.0"
+}
+
 function parse_opts() {
   repo="${@: -1}"
   
@@ -394,7 +399,6 @@ function parse_opts() {
         ;;
       --name=*)
         appname=${val}
-        shift
         ;;
       -t|--test-with=*)
         testcmd=${val}
@@ -411,6 +415,9 @@ function parse_opts() {
         ;;
       -V|--verbose)
         verbose=1
+        ;;
+      -v|--version)
+        version()
         ;;
     esac
   done
@@ -451,6 +458,9 @@ Options:
 
   -V, --verbose
       Run in verbose mode
+
+  -v, --version
+      Disply version
 EOF
 }
 
