@@ -36,7 +36,7 @@ APP_PACKAGES="
 "
 
 function run() {
-  # trap finish EXIT
+  trap finish EXIT
   
   # setup git-ssh and copy private key to the cache directory
   setup_ssh
