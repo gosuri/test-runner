@@ -369,6 +369,10 @@ function abort() {
   exit 1
 }
 
+function version() {
+  echo "0.1.0"
+}
+
 function parse_opts() {
   repo="${@: -1}"
   
@@ -412,6 +416,10 @@ function parse_opts() {
       -V|--verbose)
         verbose=1
         ;;
+      -v|--version)
+        version
+        exit 0
+        ;;
     esac
   done
   if [ -z "${repo}" ]; then
@@ -451,6 +459,9 @@ Options:
 
   -V, --verbose
       Run in verbose mode
+
+  -v, --version
+      Disply version
 EOF
 }
 

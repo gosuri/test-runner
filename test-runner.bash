@@ -417,7 +417,8 @@ function parse_opts() {
         verbose=1
         ;;
       -v|--version)
-        version()
+        version
+        exit 0
         ;;
     esac
   done
