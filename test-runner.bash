@@ -289,9 +289,7 @@ function init() {
   cachedir=$(cd $(dirname ${cachedir}); pwd)/$(basename ${cachedir})
 
   # determine applicaiton name from gitrepo
-  if [ -z "${appname}" ]; then
-    appname=$(echo "${repo}" | sed "s/^.*\///" | sed "s/.git//")
-  fi
+  [ "${appname}" ] || appname=$(echo "${repo}" | sed "s/^.*\///" | sed "s/.git//")
   
   if [ -z "${appname}" ]; then
     abort "error: could not determine application name. specify using --name=<appname>"
@@ -299,21 +297,13 @@ function init() {
 
   devimg="${appname}-dev"
 
-  if [ -z "${sshkey}" ]; then
-    sshkey=${HOME}/.ssh/id_rsa
-  fi
-  
   # create cache directory if missing
   mkdir -p ${cachedir}/${appname}-dev
   
   info "Starting tests for ${appname}"
   
-  # exit script if we would use an uninitialised variable
   set -o nounset
-
-  # exit script when a simple command (not a control structure) fails
   set -o errexit
-
   set -o pipefail
 }
 
@@ -377,7 +367,7 @@ function version() {
 function parse_opts() {
   repo="${@: -1}"
   
-  while [ $# > 0 ]; do
+  while [ $# -gt 0 ]; do
     local key="$1"
     shift
     
@@ -390,7 +380,7 @@ function parse_opts() {
 
     case ${key} in
       -b|--branch=*)
-        branch=${val}
+        [ "${val}" ] && branch=${val}
         ;;
       -c|--cache-dir=*)
         [ "${val}" ] && cachedir=${val}
