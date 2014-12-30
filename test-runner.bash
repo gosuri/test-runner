@@ -218,6 +218,8 @@ RABBITMQ_HOST=${rabbitip}
 RABBITMQ_USER=${rabbituser}
 RABBITMQ_PASSWORD=${rabbitpass}
 EOF
+  # wait for all services to bootup
+  sleep 3
 }
 
 function run_tests() {
@@ -264,7 +266,6 @@ function finish() {
     docker rm -f ${rabbit} 2>&1 | debug
     log "Removed rabbitmq container"
   fi
-
 
   if [[ ${exitcode} -eq 0 ]]; then
     info "Build successful"
