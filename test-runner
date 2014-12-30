@@ -393,22 +393,22 @@ function parse_opts() {
         branch=${val}
         ;;
       -c|--cache-dir=*)
-        [ -n ${val} ] && cachedir=${val}
+        [ "${val}" ] && cachedir=${val}
         ;;
       -k|--ssh-key=*)
-        s[ -n ${val} ] && shkey=${val}
+        [ "${val}" ] && sshkey=${val}
         ;;
       --name=*)
-        [ -n ${val} ] && appname=${val}
+        [ "${val}" ] && appname=${val}
         ;;
       -t|--test-with=*)
-        [ -n ${val} ] && testcmd=${val}
+        [ "${val}" ] && testcmd=${val}
         ;;
       --db-create-with=*)
-        [ -n ${val} ] && dbcreatecmd=${val}
+        [ "${val}" ] && dbcreatecmd=${val}
         ;;
       --db-migrate-with=*)
-        [ -n ${val} ] && dbmigratecmd=${val}
+        [ "${val}" ] && dbmigratecmd=${val}
         ;;
       -h|--help)
         show_help
