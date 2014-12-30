@@ -377,7 +377,7 @@ function version() {
 function parse_opts() {
   repo="${@: -1}"
   
-  while [[ $# > 0 ]]; do
+  while [ $# > 0 ]; do
     local key="$1"
     shift
     
@@ -393,22 +393,22 @@ function parse_opts() {
         branch=${val}
         ;;
       -c|--cache-dir=*)
-        cachedir=${val}
+        [ -n ${val} ] && cachedir=${val}
         ;;
       -k|--ssh-key=*)
-        sshkey=${val}
+        s[ -n ${val} ] && shkey=${val}
         ;;
       --name=*)
-        appname=${val}
+        [ -n ${val} ] && appname=${val}
         ;;
       -t|--test-with=*)
-        testcmd=${val}
+        [ -n ${val} ] && testcmd=${val}
         ;;
       --db-create-with=*)
-        dbcreatecmd=${val}
+        [ -n ${val} ] && dbcreatecmd=${val}
         ;;
       --db-migrate-with=*)
-        dbmigratecmd=${val}
+        [ -n ${val} ] && dbmigratecmd=${val}
         ;;
       -h|--help)
         show_help
