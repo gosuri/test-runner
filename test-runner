@@ -2,180 +2,70 @@
 
 # name of the current executable
 PROGRAM=${0##*/}
-
-RUBY_VERSION="2.1.2"
-NODE_VERSION="0.10.33"
-
-# Packages required to compile (install ruby and gems) the application
-COMPILER_PACKAGES="
-  unzip
-  git
-  git-core
-  curl
-  zlib1g-dev
-  build-essential
-  libssl-dev
-  libreadline-dev
-  libyaml-dev
-  libsqlite3-dev
-  sqlite3
-  libxml2-dev
-  libxslt1-dev
-  libcurl4-openssl-dev
-  python-software-properties
-"
-
-APP_PACKAGES="
-  postgresql-client
-  mysql-client
-  libmysqlclient-dev
-  libpq-dev
-  phantomjs
-  sphinxsearch
-  libgeoip-dev
-"
+BASEIMG=ovrclk/test-runner
 
 function run() {
+  info "Starting tests for ${appname}"
   trap finish EXIT
   
-  # setup git-ssh and copy private key to the cache directory
-  setup_ssh
+  [[ "${cachedir}" ]] || cachedir=$(mktemp -d -t ${PROGRAM}-XXXXXX)
+  # get absolute path 
+  cachedir=$(cd $(dirname ${cachedir}); pwd)/$(basename ${cachedir})
+  debug "using cache directory ${cachedir}"
 
-  # setup base, ruby and app containers if they doesn't exit
-  setup_base_containers
+  # determine applicaiton name from gitrepo
+  [[ "${appname}" ]] \
+    || appname=$(echo "${repo}" | sed "s/^.*\///" | sed "s/.git//") \
+    || abort "error: could not determine application name. specify using --name=<appname>"
   
-  # Compile application
-  compile_app
-
-  # Start support services (pg and redis)
-  start_services
+  devimg="${appname}-dev"
+  mkdir -p ${cachedir}/${appname}-dev
+  set -o nounset errexit pipefail
   
-  # Run tests and tag the current build as deploy_branch when successfull
-  run_tests && tag_build
+  setssh \
+    && compile \
+    && start_services \
+    && runtest \
+    && tag
 }
 
-function setup_ssh() {
+# setup git-ssh and copy private key to the cache directory
+function setssh() {
   log "Setting git-ssh with ${sshkey} Identity"
   echo "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o IdentityFile=${sshkey} \$*" > "${cachedir}/git-ssh"
   chmod +x "${cachedir}/git-ssh"
 }
 
-function setup_base_containers() {
-  info "Setting up base containers"
-
-  # setup base container if it doesn't exist
-  if [ -n "$(docker images | grep '^app-base ')" ]; then
-    log "Using app-base container from cache"
-  else
-    build_app_base_container
-  fi
-
-  # setup base ruby compiler container if it doens't exists
-  if [ -n "$(docker images | grep '^ruby-compiler-base ')" ]; then
-    log "Using ruby-compiler-base container from cache"
-  else
-    build_ruby_compiler_base_container
-  fi
-  
-  if [ -n "$(docker images | grep "^${devimg} ")" ]; then
-    log "Using ${devimg} container from cache"
-  else
-    build_app_dev_container
-  fi
-}
-
-function build_app_base_container() {
-  log "building application base container"
-  local dir="${cachedir}/app-base"
-  mkdir -p ${dir}
- 
-  # copy keys and set ssh config
-  cp ${sshkey} "${dir}/id_rsa"
-  echo "ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no \$*" > ${dir}/git-ssh
-
-  cat > "${dir}/Dockerfile" <<EOF
-# Pull the latest canonical ubuntu image
-FROM ubuntu
-
-ENV RUBY_VERSION ${RUBY_VERSION}
-ENV NODE_VERSION ${NODE_VERSION}
-ENV GEM_PATH /app/vendor/bundle
-
-# Set the app, gem, ruby
-# and node executables in the path
-ENV PATH /app/bin:/app/vendor/bundle/bin:/app/vendor/ruby/${RUBY_VERSION}/bin:/app/vendor/node/${NODE_VERSION}/bin:\$PATH
-
-# Add ssh keys
-ADD id_rsa /root/.ssh/id_rsa
-RUN chmod 600 /root/.ssh/id_rsa
-
-ADD git-ssh /bin/git-ssh
-RUN chmod +x /bin/git-ssh
-ENV GIT_SSH /bin/git-ssh
-EOF
-  docker build --rm --tag app-base ${cachedir}/app-base 2>&1 | debug
-}
-
-function build_ruby_compiler_base_container() {
-  log "building ruby-compiler-base container"
-  local dir="${cachedir}/ruby-compiler-base"
-  local pkgs=$(printf "%s " $COMPILER_PACKAGES)
-
-  mkdir -p ${dir}
-  cat > "${dir}/Dockerfile" <<EOF
-FROM app-base
-RUN apt-get update && apt-get install -y ${pkgs}
-
-# Create the application directory
-# where all the app's dependencies will be placed
-RUN mkdir -p /app
-
-# Install and build ruby in the app directory
-RUN git clone https://github.com/sstephenson/ruby-build.git /ruby-build
-RUN /ruby-build/bin/ruby-build ${RUBY_VERSION} /app/vendor/ruby/${RUBY_VERSION}
-
-# Install and update rubygems and install bundler
-RUN gem install rubygems-update bundler --no-ri --no-rdoc && update_rubygems
-
-# Install nodejs binaries
-RUN mkdir -p /app/vendor/node/${NODE_VERSION}
-RUN curl http://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz | tar xz --strip-components=1 -C /app/vendor/node/${NODE_VERSION}
-EOF
-  docker build --rm --tag ruby-compiler-base ${dir} 2>&1 | debug
-}
-
-function build_app_dev_container() {
-  log "building ${devimg} container"
-  local dir="${cachedir}/${devimg}"
-  local pkgs=$(printf "%s " $APP_PACKAGES)
-  mkdir -p ${dir}
-  cat > "${dir}/Dockerfile" <<EOF
-FROM ruby-compiler-base
-RUN apt-get update && apt-get install -y ${pkgs}
-ENV RAILS_ENV test
-ENV RACK_ENV test
-RUN mkdir -p /app
-WORKDIR /app
-EOF
-  docker build --rm --tag ${devimg} ${dir} 2>&1 | debug
-}
-
-function compile_app() {
+function compile() {
   info "Compiling application"
-  get_app_source
-  getdeps
   local dir="${cachedir}/${devimg}"
-  mkdir -p ${dir}
+  getsrc \
+    && [[ "${depends}" ]] \
+    && getdeps
+  
+  log "Copying ssh keys"
+  mkdir -p ${dir}/app/.ssh
+  cp ${sshkey} ${dir}/app/.ssh/id_rsa
+
+  # setup base, ruby and app containers if they doesn't exit
+  if [[ "$(docker images | grep "^${devimg}")" ]]; then
+    local img=${devimg}
+  else
+    local img=${BASEIMG}
+  fi
+
   cat > "${dir}/Dockerfile" <<EOF
-FROM ${devimg}
-ADD app app
-RUN bundle install --path=vendor/bundle --binstubs vendor/bundle/bin --jobs=4 --retry=3
+FROM ${img}
+ADD app /app
+RUN chmod 600 /app/.ssh/id_rsa
+WORKDIR /app
+RUN bundle install --path=/app/vendor/bundle --binstubs /app/vendor/bundle/bin --jobs=4 --retry=3
 EOF
   log "Building ${devimg} container"
   docker build --rm --tag ${devimg} $dir 2>&1 | debug
 }
 
-function get_app_source() {
+function getsrc() {
   log "Fetching application source from ${repo} on branch ${branch}"
   local dir="${cachedir}/${devimg}/app"
   rm -rf ${dir} # keep it fresh
@@ -239,7 +129,7 @@ EOF
   sleep 3
 }
 
-function run_tests() {
+function runtest() {
   log "Creating database using: ${dbcreatecmd}"
   docker run --rm --env-file=${envfile} $devimg ${dbcreatecmd} 2>&1 | debug
 
@@ -250,7 +140,7 @@ function run_tests() {
   docker run --rm --env-file=${envfile} -t $devimg ${testcmd} 2>&1 | log
 }
 
-function tag_build() {
+function tag() {
   local dir="${cachedir}/${devimg}/app"
   local tag="deploy_${branch}"
   log "Pushing tag ${tag} to ${repo}"
@@ -296,36 +186,6 @@ function finish() {
     rm -rf ${errlog}
     exit ${exitcode}
   fi
-}
-
-
-function init() {
-  if [ -z "${cachedir}" ]; then
-    cachedir=$(mktemp -d -t ${PROGRAM}-XXXXXX)
-  fi
-  
-  # get absolute path 
-  cachedir=$(cd $(dirname ${cachedir}); pwd)/$(basename ${cachedir})
-
-  debug "using cache directory ${cachedir}"
-
-  # determine applicaiton name from gitrepo
-  [ "${appname}" ] || appname=$(echo "${repo}" | sed "s/^.*\///" | sed "s/.git//")
-  
-  if [ -z "${appname}" ]; then
-    abort "error: could not determine application name. specify using --name=<appname>"
-  fi
-
-  devimg="${appname}-dev"
-
-  # create cache directory if missing
-  mkdir -p ${cachedir}/${appname}-dev
-  
-  info "Starting tests for ${appname}"
-  
-  set -o nounset
-  set -o errexit
-  set -o pipefail
 }
 
 function gitappname() {
@@ -514,7 +374,6 @@ rmctrns=1
 depends=
 
 parse_opts "$@"
-init
 run
 
 # vim: tw=80 noexpandtab

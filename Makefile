@@ -1,3 +1,4 @@
+IMAGE   = ovrclk/test-runner
 SHELL		= /bin/sh
 PREFIX	= /usr/local
 SOURCES	= test-runner.bash
@@ -24,7 +25,10 @@ run: all
 uninstall:
 	rm -f "$(execdir)/$(PROGRAM)"
 
+image:
+	docker build -t $(IMAGE) image
+
 clean:
 	rm -f $(PROGRAM)
 
-.PHONY: run install uninstall clean
+.PHONY: run install uninstall clean image

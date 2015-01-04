@@ -1,0 +1,124 @@
+#!/usr/bin/bash
+set +e
+
+PACKAGES="
+unzip
+zip
+git
+git-core
+curl
+daemontools
+dnsutils
+ed
+python
+python-dev
+socat
+syslinux
+tar
+telnet
+zlib1g-dev
+zlib1g-dev
+build-essential
+libssl-dev
+libreadline-dev
+libyaml-dev
+libsqlite3-dev
+sqlite3
+libxml2-dev
+libxslt1-dev
+libcurl4-openssl-dev
+python-software-properties
+postgresql-client
+mysql-client
+libmysqlclient-dev
+libpq-dev
+phantomjs
+sphinxsearch
+libgeoip-dev
+"
+
+function run() {
+  getdeps
+  getlocales
+  mkusers
+  finalize
+  summarize
+}
+
+function getdeps() {
+  cat > /etc/apt/sources.list <<EOF
+deb http://archive.ubuntu.com/ubuntu trusty main
+deb http://archive.ubuntu.com/ubuntu trusty-security main
+deb http://archive.ubuntu.com/ubuntu trusty-updates main
+deb http://archive.ubuntu.com/ubuntu trusty universe
+EOF
+  apt-get update
+  apt-get install -y --force-yes $(printf "%s " ${PACKAGES})
+
+  # Install and build ruby in the app directory
+  mkdir -p /app/vendor/ruby/${RUBY_VERSION}
+  git clone https://github.com/sstephenson/ruby-build.git /tmp/ruby-build
+  /tmp/ruby-build/bin/ruby-build ${RUBY_VERSION} /app/vendor/ruby/${RUBY_VERSION}
+  /app/vendor/ruby/${RUBY_VERSION}/bin/gem install rubygems-update bundler --no-ri --no-rdoc && update_rubygems
+
+  # Install nodejs binaries
+  mkdir -p /app/vendor/node/${NODE_VERSION}
+  curl -sL http://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz \
+    | tar xzC /app/vendor/node/${NODE_VERSION} --strip-components=1 
+}
+
+function getlocales() {
+  apt-cache search language-pack \
+    | cut -d ' ' -f 1 \
+    | grep -v '^language\-pack\-\(gnome\|kde\)\-' \
+    | grep -v '\-base$' \
+    | xargs apt-get install -y --force-yes --no-install-recommends
+}
+
+function finalize() {
+  rm -rf /var/cache/apt/archives/*.deb
+  rm -rf /root/*
+  rm -rf /tmp/*
+  prunedfind -perm /u+s | xargs -r chmod u-s
+  prunedfind -perm /g+s | xargs -r chmod g-s
+
+  # remove non-root ownership of files
+  chown root:root /var/lib/libuuid
+}
+
+function mkusers() {
+  mkdir -p /app/.ssh
+  addgroup --quiet --gid 2000 tester && \
+      useradd tester --uid=2000 --gid=2000 --home-dir /app --no-create-home
+  chown -R tester:tester /app
+cat > /app/.ssh/config <<EOF
+Host github.com
+  UserKnownHostsFile /dev/null
+  StrictHostKeyChecking no 
+EOF
+}
+
+function prunedfind() {
+  find / -type d \( -name dev -o -name proc \) -prune -o $@ -print
+}
+
+function summarize() {
+  set +x
+  echo -e "\nRemaining suspicious security bits:"
+  (
+    prunedfind ! -user root
+    prunedfind -perm /u+s
+    prunedfind -perm /g+s
+    prunedfind -perm /+t
+  ) | sed -u "s/^/  /"
+
+  echo -e "\nInstalled versions:"
+  (
+    git --version
+    ruby -v
+    gem -v
+    python -V
+  ) | sed -u "s/^/  /" 
+}
+
+run
