@@ -163,6 +163,7 @@ EOF
 function compile_app() {
   info "Compiling application"
   get_app_source
+  getdeps
   local dir="${cachedir}/${devimg}"
   mkdir -p ${dir}
   cat > "${dir}/Dockerfile" <<EOF
@@ -179,8 +180,24 @@ function get_app_source() {
   local dir="${cachedir}/${devimg}/app"
   rm -rf ${dir} # keep it fresh
   mkdir -p ${dir}
-  GIT_SSH="${cachedir}/git-ssh" git clone -q -b ${branch} ${repo} ${dir} --depth 1 > ${errlog} 2>&1 
+  gitssh clone -q -b ${branch} ${repo} ${dir} --depth 1 > ${errlog} 2>&1 
   rm ${errlog}
+}
+
+function gitssh() {
+  GIT_SSH="${cachedir}/git-ssh" git $*
+}
+
+function getdeps() {
+  local branch="master"
+  for dep in ${depends}; do
+    local dir="${cachedir}/${devimg}/app/vendor"
+    log "Fetching dependency application source from ${dep} to ${dir}"
+    rm -rf ${dir} # keep it fresh
+    mkdir -p ${dir}
+    $(cd ${dir}; gitssh clone -q -b ${branch} ${dep} --depth 1 > ${errlog} 2>&1)
+    rm ${errlog}
+  done
 }
 
 function start_services() {
@@ -269,7 +286,7 @@ function finish() {
     fi
   fi
 
-  if [[ ${exitcode} -eq 0 ]]; then
+  if [ ${exitcode} -eq 0 ]; then
     info "Build successful"
     rm -rf ${errlog}
     exit 0
@@ -311,6 +328,10 @@ function init() {
   set -o pipefail
 }
 
+function gitappname() {
+  local source="${1}"
+  echo "${source}" | sed "s/^.*\///" | sed "s/.git//"
+}
 
 function abort_if_missing_command() {
   local cmd=$1
@@ -407,6 +428,9 @@ function parse_opts() {
       --rm=*)
         [ "${val}" == "false" ] && rmctrns=0
         ;;
+      -d | --depends=*)
+        [ "${val}" ] && depends="${depends} ${val}"
+        ;;
       -h|--help)
         show_help
         exit 0
@@ -458,6 +482,9 @@ Options:
   --rm=true
       Automatically remove the containers when it exits
 
+  -d, --depends=[]
+      Git repos to add to /app/vendor directory
+
   -V, --verbose
       Run in verbose mode
 
@@ -467,23 +494,24 @@ EOF
 }
 
 verbose=0
-repo=''
-cachedir=''
-appname=''
-devimg=''
+repo=
+cachedir=
+appname=
+devimg=
 sshkey="${HOME}/.ssh/id_rsa"
 branch='master'
 testcmd="bundle exec rspec"
 dbcreatecmd="bundle exec rake db:create"
 dbmigratecmd="bundle exec rake db:migrate"
-redis=''
-redisip=''
-pg=''
-pgip=''
-rabbit=''
-rabbitip=''
+redis=
+redisip=
+pg=
+pgip=
+rabbit=
+rabbitip=
 errlog=$(mktemp -t ${PROGRAM}-err-XXXX)
 rmctrns=1
+depends=
 
 parse_opts "$@"
 init
