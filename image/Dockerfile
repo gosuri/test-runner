@@ -11,6 +11,3 @@ ENV PATH /app/bin:/app/vendor/bundle/bin:/app/vendor/ruby/${RUBY_VERSION}/bin:/a
 
 ADD ./bootstrap /tmp/bootstrap
 RUN bash /tmp/bootstrap
-
-USER tester
-ENV HOME /app

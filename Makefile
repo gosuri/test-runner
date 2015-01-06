@@ -31,4 +31,4 @@ image:
 clean:
 	rm -f $(PROGRAM)
 
-.PHONY: run install uninstall clean image
+.PHONY: $(PROGRAM) all run install uninstall clean image

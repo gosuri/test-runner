@@ -90,12 +90,12 @@ function mkusers() {
   mkdir -p /app/.ssh
   addgroup --quiet --gid 2000 tester && \
       useradd tester --uid=2000 --gid=2000 --home-dir /app --no-create-home
-  chown -R tester:tester /app
 cat > /app/.ssh/config <<EOF
 Host github.com
   UserKnownHostsFile /dev/null
   StrictHostKeyChecking no 
 EOF
+  chown -R tester:tester /app
 }
 
 function prunedfind() {

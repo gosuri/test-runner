@@ -1,14 +1,33 @@
 #!/usr/bin/env bash
-
-# name of the current executable
 PROGRAM=${0##*/}
 BASEIMG=ovrclk/test-runner
+
+verbose=0
+repo=
+cachedir=$(mktemp -d -t ${PROGRAM}-XXXXXX)
+appname=
+devimg=
+sshkey="${HOME}/.ssh/id_rsa"
+branch='master'
+dbcreatecmd="bundle exec rake db:create"
+dbmigratecmd="bundle exec rake db:migrate"
+redis=
+redisip=
+pg=
+pgip=
+rabbit=
+rabbitip=
+errlog=$(mktemp -t ${PROGRAM}-err-XXXX)
+rmctrns=1
+depends=
+pre=
+testcmd="bundle exec rake"
+post=
 
 function run() {
   info "Starting tests for ${appname}"
   trap finish EXIT
   
-  [[ "${cachedir}" ]] || cachedir=$(mktemp -d -t ${PROGRAM}-XXXXXX)
   # get absolute path 
   cachedir=$(cd $(dirname ${cachedir}); pwd)/$(basename ${cachedir})
   debug "using cache directory ${cachedir}"
@@ -17,7 +36,8 @@ function run() {
   [[ "${appname}" ]] \
     || appname=$(echo "${repo}" | sed "s/^.*\///" | sed "s/.git//") \
     || abort "error: could not determine application name. specify using --name=<appname>"
-  
+  debug "setting appname to: ${appname}"
+
   devimg="${appname}-dev"
   mkdir -p ${cachedir}/${appname}-dev
   set -o nounset errexit pipefail
@@ -39,13 +59,18 @@ function setssh() {
 function compile() {
   info "Compiling application"
   local dir="${cachedir}/${devimg}"
-  getsrc \
-    && [[ "${depends}" ]] \
-    && getdeps
+  getsrc
   
   log "Copying ssh keys"
   mkdir -p ${dir}/app/.ssh
   cp ${sshkey} ${dir}/app/.ssh/id_rsa
+
+  cat > ${dir}/app/.ssh/config <<EOF
+Host github.com
+     UserKnownHostsFile /dev/null
+     StrictHostKeyChecking no 
+     IdentityFile /app/.ssh/id_rsa
+EOF
 
   # setup base, ruby and app containers if they doesn't exit
   if [[ "$(docker images | grep "^${devimg}")" ]]; then
@@ -57,7 +82,8 @@ function compile() {
   cat > "${dir}/Dockerfile" <<EOF
 FROM ${img}
 ADD app /app
-RUN chmod 600 /app/.ssh/id_rsa
+ENV HOME /app
+RUN cp /app/.ssh/config /etc/ssh/ssh_config
 WORKDIR /app
 RUN bundle install --path=/app/vendor/bundle --binstubs /app/vendor/bundle/bin --jobs=4 --retry=3
 EOF
@@ -130,11 +156,9 @@ EOF
 }
 
 function runtest() {
-  log "Creating database using: ${dbcreatecmd}"
-  docker run --rm --env-file=${envfile} $devimg ${dbcreatecmd} 2>&1 | debug
-
-  log "Running database migrations using: ${dbmigratecmd}"
-  docker run --rm --env-file=${envfile} $devimg /bin/sh -c "${dbmigratecmd}" 2>&1 | debug
+  [[ "${pre}" ]] \
+    && log "Running pre-test commands: ${pre}" \
+    && docker run --rm --env-file=${envfile} $devimg ${pre} 2>&1 | debug
 
   info "Running tests using: ${testcmd}"
   docker run --rm --env-file=${envfile} -t $devimg ${testcmd} 2>&1 | log
@@ -246,111 +270,144 @@ function abort() {
 }
 
 function version() {
-  echo "0.1.0"
+  echo "test-runner 0.1.0"
 }
 
-function parse_opts() {
-  repo="${@: -1}"
-  
-  while [ $# -gt 0 ]; do
-    local key="$1"
-    shift
-    
-    # Parse the long option and then the short
-    # using substring removal ${string##substring}
-    # http://tldp.org/LDP/abs/html/string-manipulation.html
-    local val="${key#*=}"
-    [ "${val}" == "${key}" ] &&
-      local val="${1}"
-
-    case ${key} in
-      -b|--branch=*)
-        [ "${val}" ] && branch=${val}
-        ;;
-      -c|--cache-dir=*)
-        [ "${val}" ] && cachedir=${val}
-        ;;
-      -k|--ssh-key=*)
-        [ "${val}" ] && sshkey=${val}
-        ;;
-      --name=*)
-        [ "${val}" ] && appname=${val}
-        ;;
-      -t|--test-with=*)
-        [ "${val}" ] && testcmd=${val}
-        ;;
-      --db-create-with=*)
-        [ "${val}" ] && dbcreatecmd=${val}
-        ;;
-      --db-migrate-with=*)
-        [ "${val}" ] && dbmigratecmd=${val}
-        ;;
-      --rm=*)
-        [ "${val}" == "false" ] && rmctrns=0
-        ;;
-      -d | --depends=*)
-        [ "${val}" ] && depends="${depends} ${val}"
-        ;;
-      -h|--help)
-        show_help
-        exit 0
-        ;;
-      -V|--verbose)
-        verbose=1
-        ;;
-      -v|--version)
-        version
-        exit 0
-        ;;
-    esac
+function parseopts() {
+  # short flags
+  local flags="V"
+  local inputs=("$@")
+  local options=()
+  local arguments=()
+  local values=()
+  let local position=0
+  while [ ${position} -lt ${#inputs[*]} ]; do
+    local arg="${inputs[${position}]}"
+    if [ "${arg:0:1}" = "-" ]; then
+      # parse long options (--option=value)
+      if [ "${arg:1:1}" = "-" ]; then
+        local key="${arg:2}"
+        local val="${key#*=}"
+        local opt="${key/=${val}}"
+        local values[${#options[*]}]=${val}
+        local options[${#options[*]}]=${opt}
+      else
+        # parse short options (-o value) and 
+        # stacked options (-opq val val val)
+        let local index=1
+        while [ ${index} -lt ${#arg} ]; do
+          local opt=${arg:${index}:1}
+          let local index+=1
+          let local isflag=0
+          for flag in ${flags}; do
+            if [ "${opt}" == "${flag}" ]; then
+              let local isflag=1
+            fi
+          done
+          # skip storing the value if this it is a flag
+          if [ ${isflag} == 0 ]; then
+            let local position+=1
+            local values[${#options[*]}]=${inputs[position]}
+          fi
+          local options[${#options[*]}]="${opt}"
+        done
+      fi
+    else
+      # parse positional arguments
+      local arguments[${#arguments[*]}]="$arg"
+    fi
+    let local position+=1
   done
-  if [ -z "${repo}" ]; then
-    show_help 
-    exit 1
-  fi
+
+  # accept only one argument
+  [ ${#arguments[*]} -gt 1 ] && echo "Usage: $(usage)" >&2
+
+  repo=${arguments[0]}
+
+  local index=0
+  for option in "${options[@]}"; do
+    case "$option" in
+    "h" | "help" )
+      help
+      exit 0
+      ;;
+    "v" | "version" )
+      version
+      exit 0
+      ;;
+    "c" | "cache" )
+      cachedir=${values[${index}]}
+      ;;
+    "b" | "branch" )
+      branch=${values[${index}]}
+      ;;
+    "k" | "ssh-key" )
+      sshkey=${values[${index}]}
+      ;;
+    "n" | "name" )
+      name=${values[${index}]}
+      ;;
+    "p" | "pre" )
+      pre=${values[${index}]}
+      ;;
+    "t" | "test" )
+      testcmd=${values[${index}]}
+      ;;
+    "post" )
+      post=${values[${index}]}
+      ;;
+    "rm" )
+      [[ "${values[${index}]}" == false ]] && rmctrns=0
+      ;;
+    "e" | "env" )
+      envvars="${envvars} -e ${values[${index}]}"
+      ;;
+    "V" | "verbose" )
+      verbose=1
+      ;;
+    * )
+      echo "Usage: $(usage)" >&2
+      exit 1
+      ;;
+    esac
+    let local index+=1
+  done
 }
 
-function show_help() {
-  cat <<EOF
-Usage: ${PROGRAM} [OPTIONS] GIT_REPO
+function usage() {
+  echo "${PROGRAM} [options] REPO"
+}
 
-Runs tests for the given repo in a container
+function help() {
+  version
+  echo
+  echo "Usage:"
+  echo "  $(usage)"
+  echo
+  echo "Options:"
+  echo "  -c DIR --cache=DIR          Use the cache from DIR."
+  echo "  -b BRANCH --branch BRANCH   Use instead of the default. [default: master]"
+  echo "  -k KEY --ssh-key KEY        Private key for accessing git. [default: ${HOME}/.ssh/id_rsa]"
+  echo "  -t CMD --test CMD           Run tests with CMD. [default: rake]" 
+  echo "  -p CMD --pre CMD            Run CMD before running tests."
+  echo "  --post CMD                  Run CMD before after tests."
+  echo "  -n --name=NAME              Application name, autogenerated based on the git repo path."
+  echo "  -V --verbose                Run in verbose mode."
+  echo "  -h --help                   Display this help message."
+  echo "  -v --version                Display the version number."
+}
 
-Options:
-
-  -b, --branch="master"
-      Git branch to pull the source from
-
-  -k, --ssh-key="$HOME/.ssh/id_rsa"
-      SSH key for git repo access
-
-  -c, --cache-dir="${cachedir}"
-      Cache directory
-
-  -t, --test-with="${testcmd}"
-      Test command running tests with
-
-  --db-create-with="${dbcreatecmd}"
-      Command to create database with
-
-  --db-migrate-with="${dbmigratecmd}" 
-      Command to migrate run database migrations with
-
-  --name=""
-      Application name. Autogenerated based on the git repo path
-
-  --rm=true
-      Automatically remove the containers when it exits
-
-  -d, --depends=[]
-      Git repos to add to /app/vendor directory
-
-  -V, --verbose
-      Run in verbose mode
-
-  -v, --version
-      Disply version
-EOF
+function debugopts() {
+  debug "executing with options"
+  debug "repo: ${repo}" 
+  debug "cachedir: ${cachedir}" 
+  debug "branch: ${branch}" 
+  debug "sshkey: ${sshkey}" 
+  debug "testcmd: ${testcmd}" 
+  debug "pre: ${pre}" 
+  debug "post: ${post}" 
+  debug "appname: ${appname}" 
+  debug "verbose: ${verbose}" 
 }
 
 verbose=0
@@ -360,7 +417,6 @@ appname=
 devimg=
 sshkey="${HOME}/.ssh/id_rsa"
 branch='master'
-testcmd="bundle exec rspec"
 dbcreatecmd="bundle exec rake db:create"
 dbmigratecmd="bundle exec rake db:migrate"
 redis=
@@ -372,8 +428,12 @@ rabbitip=
 errlog=$(mktemp -t ${PROGRAM}-err-XXXX)
 rmctrns=1
 depends=
+pre=
+testcmd="bundle exec rake"
+post=
 
-parse_opts "$@"
+parseopts "$@"
+debugopts
 run
 
 # vim: tw=80 noexpandtab
