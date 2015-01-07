@@ -5,6 +5,7 @@ BASEIMG=ovrclk/test-runner
 verbose=0
 repo=
 cachedir="$(mktemp -d -t ${PROGRAM}-XXXXXX)"
+approot=
 appname=
 devimg=
 sshkey="${HOME}/.ssh/id_rsa"
@@ -25,6 +26,9 @@ testcmd="bundle exec rake"
 post=
 
 function run() {
+  set -o nounset 
+  set -o errexit 
+  set -o pipefail
   trap finish EXIT
   
   # get absolute path 
@@ -41,13 +45,14 @@ function run() {
   info "Starting tests for ${appname}"
 
   devimg="${appname}-dev"
-  mkdir -p ${cachedir}/${appname}-dev
-  set -o nounset errexit pipefail
+  approot="${cachedir}/${appname}-dev"
+  mkdir -p ${approot}
   
   setssh
   compile
   start_services
-  runtest && tag
+  runtest
+  tag
 }
 
 # setup git-ssh and copy private key to the cache directory
@@ -157,12 +162,10 @@ EOF
 }
 
 function runtest() {
-  [[ "${pre}" ]] \
-    && log "Running pre-test commands: ${pre}" \
-    && docker run --rm --env-file=${envfile} $devimg ${pre} 2>&1 | debug
-
-  info "Running tests using: ${testcmd}"
-  docker run --rm --env-file=${envfile} -t $devimg ${testcmd} 2>&1 | log
+  cmd=${testcmd}
+  [[ "${pre}" ]]  && cmd="${pre}; ${cmd}" 
+  info "Running tests using: ${cmd}"
+  docker run --rm --env-file=${envfile} -t $devimg /bin/bash -c "${cmd}" 2>&1 | log
 }
 
 function tag() {
@@ -281,7 +284,8 @@ function parseopts() {
   local options=()
   local arguments=()
   local values=()
-  let local position=0
+  local postion=0
+  let position=0
   while [ ${position} -lt ${#inputs[*]} ]; do
     local arg="${inputs[${position}]}"
     if [ "${arg:0:1}" = "-" ]; then
@@ -295,19 +299,19 @@ function parseopts() {
       else
         # parse short options (-o value) and 
         # stacked options (-opq val val val)
-        let local index=1
+        let index=1
         while [ ${index} -lt ${#arg} ]; do
           local opt=${arg:${index}:1}
-          let local index+=1
-          let local isflag=0
+          let index+=1
+          let isflag=0
           for flag in ${flags}; do
             if [ "${opt}" == "${flag}" ]; then
-              let local isflag=1
+              let isflag=1
             fi
           done
           # skip storing the value if this it is a flag
           if [ ${isflag} == 0 ]; then
-            let local position+=1
+            let position+=1
             local values[${#options[*]}]=${inputs[position]}
           fi
           local options[${#options[*]}]="${opt}"
@@ -317,14 +321,9 @@ function parseopts() {
       # parse positional arguments
       local arguments[${#arguments[*]}]="$arg"
     fi
-    let local position+=1
+    let position+=1
   done
 
-  # accept only one argument
-  [ ${#arguments[*]} -gt 1 ] && echo "Usage: $(usage)" >&2 && exit 1
-
-  repo=${arguments[0]} 
-  [ "${repo}" ] || echo "repository is missing" && echo "Usage: $(usage)" >&2 && exit 1
 
   local index=0
   for option in "${options[@]}"; do
@@ -347,7 +346,7 @@ function parseopts() {
       sshkey=${values[${index}]}
       ;;
     "n" | "name" )
-      name=${values[${index}]}
+      appname=${values[${index}]}
       ;;
     "p" | "pre" )
       pre=${values[${index}]}
@@ -359,7 +358,7 @@ function parseopts() {
       post=${values[${index}]}
       ;;
     "rm" )
-      [[ "${values[${index}]}" == false ]] && rmctrns=0
+      [[ "${values[${index}]}" == "false" ]] && rmctrns=0
       ;;
     "e" | "env" )
       envvars="${envvars} -e ${values[${index}]}"
@@ -374,6 +373,18 @@ function parseopts() {
     esac
     let local index+=1
   done
+  
+  # accept only one argument
+  if [ ${#arguments[*]} -gt 1 ]; then
+    echo "Usage: $(usage)" >&2
+    exit 1
+  fi
+
+  repo=${arguments[0]} 
+  if [ -z "${repo}" ]; then
+    ${PROGRAM} --help
+    exit 1
+  fi
 }
 
 function usage() {
