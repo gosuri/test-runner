@@ -4,7 +4,7 @@ BASEIMG=ovrclk/test-runner
 
 verbose=0
 repo=
-cachedir=$(mktemp -d -t ${PROGRAM}-XXXXXX)
+cachedir="$(mktemp -d -t ${PROGRAM}-XXXXXX)"
 appname=
 devimg=
 sshkey="${HOME}/.ssh/id_rsa"
@@ -25,10 +25,10 @@ testcmd="bundle exec rake"
 post=
 
 function run() {
-  info "Starting tests for ${appname}"
   trap finish EXIT
   
   # get absolute path 
+  [ "${cachedir}" ] || abort "cache directory is missing"
   cachedir=$(cd $(dirname ${cachedir}); pwd)/$(basename ${cachedir})
   debug "using cache directory ${cachedir}"
 
@@ -37,16 +37,17 @@ function run() {
     || appname=$(echo "${repo}" | sed "s/^.*\///" | sed "s/.git//") \
     || abort "error: could not determine application name. specify using --name=<appname>"
   debug "setting appname to: ${appname}"
+  
+  info "Starting tests for ${appname}"
 
   devimg="${appname}-dev"
   mkdir -p ${cachedir}/${appname}-dev
   set -o nounset errexit pipefail
   
-  setssh \
-    && compile \
-    && start_services \
-    && runtest \
-    && tag
+  setssh
+  compile
+  start_services
+  runtest && tag
 }
 
 # setup git-ssh and copy private key to the cache directory
@@ -409,28 +410,6 @@ function debugopts() {
   debug "appname: ${appname}" 
   debug "verbose: ${verbose}" 
 }
-
-verbose=0
-repo=
-cachedir=
-appname=
-devimg=
-sshkey="${HOME}/.ssh/id_rsa"
-branch='master'
-dbcreatecmd="bundle exec rake db:create"
-dbmigratecmd="bundle exec rake db:migrate"
-redis=
-redisip=
-pg=
-pgip=
-rabbit=
-rabbitip=
-errlog=$(mktemp -t ${PROGRAM}-err-XXXX)
-rmctrns=1
-depends=
-pre=
-testcmd="bundle exec rake"
-post=
 
 parseopts "$@"
 debugopts
