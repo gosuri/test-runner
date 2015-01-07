@@ -321,9 +321,10 @@ function parseopts() {
   done
 
   # accept only one argument
-  [ ${#arguments[*]} -gt 1 ] && echo "Usage: $(usage)" >&2
+  [ ${#arguments[*]} -gt 1 ] && echo "Usage: $(usage)" >&2 && exit 1
 
-  repo=${arguments[0]}
+  repo=${arguments[0]} 
+  [ "${repo}" ] || echo "repository is missing" && echo "Usage: $(usage)" >&2 && exit 1
 
   local index=0
   for option in "${options[@]}"; do
