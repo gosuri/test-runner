@@ -91,10 +91,22 @@ ADD app /app
 ENV HOME /app
 RUN cp /app/.ssh/config /etc/ssh/ssh_config
 WORKDIR /app
-RUN bundle install --path=/app/vendor/bundle --binstubs /app/vendor/bundle/bin --jobs=4 --retry=3
 EOF
-  log "Building ${devimg} container"
   docker build --rm --tag ${devimg} $dir 2>&1 | debug
+
+  if [ -f "${dir}/app/Gemfile" ]; then
+    log "Ruby app detected. Installing gem dependencies using bundler."
+    local name="${devimg}-${RANDOM}"
+    docker run --name=${name} ${devimg} bundle install --path=/app/vendor/bundle --binstubs /app/vendor/bundle/bin --jobs=4 --retry=3 2>&1 | debug
+    docker commit ${name} ${devimg}:latest 2>&1 | debug
+  fi
+
+  # if [ -f "${dir}/app/package.json" ]; then
+  #   log "Javascript app detected. Installing nodejs dependencies using npm."
+  #   local name="${devimg}-${RANDOM}"
+  #   docker run --name=${name} ${devimg} npm install 2>&1 | debug
+  #   docker commit ${name} ${devimg}:latest 2>&1 | debug
+  # fi
 }
 
 function getsrc() {
