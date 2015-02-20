@@ -1,5 +1,5 @@
 #!/usr/bin/bash
-set +e
+set -e
 
 PACKAGES="
 unzip
@@ -35,11 +35,12 @@ libpq-dev
 phantomjs
 sphinxsearch
 libgeoip-dev
+openjdk-7-jre-headless
 "
 
 function run() {
   getdeps
-  getlocales
+  #getlocales
   mkusers
   finalize
   summarize
@@ -52,19 +53,24 @@ deb http://archive.ubuntu.com/ubuntu trusty-security main
 deb http://archive.ubuntu.com/ubuntu trusty-updates main
 deb http://archive.ubuntu.com/ubuntu trusty universe
 EOF
-  apt-get update
+  apt-get update -y
   apt-get install -y --force-yes $(printf "%s " ${PACKAGES})
 
   # Install and build ruby in the app directory
-  mkdir -p /app/vendor/ruby/${RUBY_VERSION}
-  git clone https://github.com/sstephenson/ruby-build.git /tmp/ruby-build
-  /tmp/ruby-build/bin/ruby-build ${RUBY_VERSION} /app/vendor/ruby/${RUBY_VERSION}
-  /app/vendor/ruby/${RUBY_VERSION}/bin/gem install rubygems-update bundler --no-ri --no-rdoc && update_rubygems
+  if [[ "${RUBY_VERSION}" ]]; then
+    mkdir -p /app/vendor/ruby/${RUBY_VERSION}
+    git clone https://github.com/sstephenson/ruby-build.git /tmp/ruby-build
+    /tmp/ruby-build/bin/ruby-build ${RUBY_VERSION} /app/vendor/ruby/${RUBY_VERSION}
+    ln -s /app/vendor/ruby/${RUBY_VERSION} /usr/lib/ruby
+    /app/vendor/ruby/${RUBY_VERSION}/bin/gem install rubygems-update bundler --no-ri --no-rdoc && update_rubygems
+  fi
 
   # Install nodejs binaries
-  mkdir -p /app/vendor/node/${NODE_VERSION}
-  curl -sL http://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz \
-    | tar xzC /app/vendor/node/${NODE_VERSION} --strip-components=1 
+  if [[ "${NODE_VERSION}" ]]; then
+    mkdir -p /app/vendor/node/${NODE_VERSION}
+    curl -sL http://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz \
+      | tar xzC /app/vendor/node/${NODE_VERSION} --strip-components=1 
+  fi
 }
 
 function getlocales() {
@@ -115,8 +121,6 @@ function summarize() {
   echo -e "\nInstalled versions:"
   (
     git --version
-    ruby -v
-    gem -v
     python -V
   ) | sed -u "s/^/  /" 
 }

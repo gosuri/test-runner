@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 PROGRAM=${0##*/}
 BASEIMG=ovrclk/test-runner
+VERSION=0.1.1
 
 verbose=0
 repo=
@@ -49,6 +50,8 @@ function run() {
   mkdir -p ${approot}
   
   setssh
+  getsrc
+  setimage
   compile
   start_services
   runtest
@@ -62,10 +65,24 @@ function setssh() {
   chmod +x "${cachedir}/git-ssh"
 }
 
+function setimage() {
+  local src="${cachedir}/${devimg}/app"
+  if [ -f "$src/.ruby-version" ]; then
+    local img="ovrclk/test-runner-$(cat $src/.ruby-version)"
+    info "Searching for base image ${img} in the docker registry"
+    results=$(docker search $img | wc -l)
+    if [ $results -gt 1 ]; then
+      BASEIMG=$img
+      log "Using base image ($img) from the registry."
+    else
+      BASEIMG="ovrclk/test-runner-2.1.2"
+      log "Suitable base image was not found in registry, using $BASEIMG as base. Futher versions will support compilation for base images"
+    fi
+  fi
+}
+
 function compile() {
-  info "Compiling application"
   local dir="${cachedir}/${devimg}"
-  getsrc
   
   log "Copying ssh keys"
   mkdir -p ${dir}/app/.ssh
@@ -82,9 +99,10 @@ EOF
   if [[ "$(docker images | grep "^${devimg}")" ]]; then
     local img=${devimg}
   else
-    local img=${BASEIMG}
+    local img=$BASEIMG
   fi
 
+  info "Compiling application"
   cat > "${dir}/Dockerfile" <<EOF
 FROM ${img}
 ADD app /app
@@ -286,7 +304,7 @@ function abort() {
 }
 
 function version() {
-  echo "test-runner 0.1.0"
+  echo "test-runner ${VERSION}"
 }
 
 function parseopts() {

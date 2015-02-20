@@ -5,9 +5,8 @@ ENV DEBIAN_FRONTEND noninteractive
 ENV LC_ALL C
 ENV RAILS_ENV test
 ENV RACK_ENV test
-ENV RUBY_VERSION 2.1.2
 ENV NODE_VERSION 0.10.33
-ENV PATH /app/bin:/app/vendor/bundle/bin:/app/vendor/ruby/${RUBY_VERSION}/bin:/app/vendor/node/${NODE_VERSION}/bin:${PATH}
+ENV PATH /app/bin:/app/vendor/bundle/bin:/usr/lib/ruby/bin:/app/vendor/node/${NODE_VERSION}/bin:${PATH}
 
-ADD ./bootstrap /tmp/bootstrap
-RUN bash /tmp/bootstrap
+ADD ./bootstrap /bootstrap
+CMD bash /bootstrap

@@ -1,0 +1,21 @@
+#!/bin/bash
+IMAGE=ovrclk/test-runner  
+
+set -e
+
+echo -e "==> Building base image at $IMAGE."
+log=$(mktemp -t test-runner-build-XXXX)
+
+$(docker build -t $IMAGE image > $log 2>&1) || $(cat $log && exit 1)
+id=$(docker run -d $IMAGE 2> $log)
+if [[ $(docker wait $id) ]]; then
+  docker commit $id $IMAGE:latest > /dev/null
+  docker commit $id $IMAGE:$(./test-runner --version | cut -d' ' -f2) > /dev/null
+  docker rm $id > /dev/null
+  rm $log
+  echo -e "==> Base image successfully built at $IMAGE."
+else
+  cat $log
+  echo  >&2 -e "==> Error building base image."
+  exit 1
+fi

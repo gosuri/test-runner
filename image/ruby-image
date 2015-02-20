@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -e
+ruby="$1"
+echo -e "==> Building ruby ($ruby) image"
+log=$(mktemp -t test-runner-build-XXXX)
+id=$(docker run -e RUBY_VERSION=$ruby -d ovrclk/test-runner 2> ${log}) || $(echo "error: $(cat $log)" && exit 1)
+if [[ $(docker wait $id) ]]; then
+  docker commit $id "ovrclk/test-runner-$ruby" > /dev/null
+  docker rm $id > /dev/null
+  cat $log
+  echo -e "==> Successfully built ruby ($ruby) image at ovrclk/test-runner-$ruby"
+else
+  cat $log
+  echo
+  echo -e "===> Error Building $ruby image"
+  exit 1
+fi
+rm $log
