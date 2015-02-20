@@ -3,7 +3,7 @@ SHELL   = /bin/sh
 PREFIX  = /usr/local
 SOURCES	= test-runner.bash
 PROGRAM = test-runner
-RUBIES  = 2.1.2 jruby-1.7.9
+RUBIES  = 1.9.3-p551 2.0.0-p598 2.1.2 2.1.5 2.2.0 jruby-1.7.9
 
 execdir=$(PREFIX)/bin
 
@@ -39,7 +39,7 @@ clean:
 
 publish:
 	docker push $(IMAGE)
-	@$(foreach img, $(RUBIES), docker push $(img);)
+	@$(foreach img, $(RUBIES), docker push ovrclk/test-runner-$(img);)
 
 
 .PHONY: $(PROGRAM) $(RUBIES) rubies all run install uninstall clean image

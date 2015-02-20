@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 PROGRAM=${0##*/}
 BASEIMG=ovrclk/test-runner
-VERSION=0.1.1
+MAJOR_VER='0.1.2'
+MINOR_VER='.dev'
+VERSION="${MAJOR_VER}${MINOR_VER}"
 
 verbose=0
 repo=
