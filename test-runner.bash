@@ -2,7 +2,7 @@
 PROGRAM=${0##*/}
 BASEIMG=ovrclk/test-runner
 MAJOR_VER='0.1.2'
-MINOR_VER='.dev'
+MINOR_VER=''
 VERSION="${MAJOR_VER}${MINOR_VER}"
 
 verbose=0
