@@ -111,6 +111,7 @@ FROM ${img}
 ADD app /app
 ENV HOME /app
 RUN cp /app/.ssh/config /etc/ssh/ssh_config
+RUN mkdir -p /app/vendor/bundle/bin
 WORKDIR /app
 EOF
   docker build --rm --tag ${devimg} $dir 2>&1 | debug
